@@ -1,11 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { exec } = require('child_process');
 const fs = require('fs');
-const { promisify } = require('util');
 
-const execPromise = promisify(exec);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -82,8 +79,6 @@ if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
-const EDGE_BIN = path.join(__dirname, 'node_modules', '.bin', process.platform === 'win32' ? 'edge-tts.cmd' : 'edge-tts');
-
 // Endpoint: Obtener lista de voces
 app.get('/api/voces', (req, res) => {
   const lista = Object.entries(VOCES).map(([id, info]) => ({
@@ -110,15 +105,21 @@ app.post('/api/tts', async (req, res) => {
   const timestamp = Date.now();
   const outputFile = path.join(TEMP_DIR, `audio_${timestamp}.mp3`);
   
-  // Escapar el texto para la línea de comandos
-  const textoEscapado = texto.replace(/"/g, '\\"').replace(/\n/g, ' ');
+  // Escapar saltos de línea
+  const textoEscapado = texto.replace(/\n/g, ' ');
   
   try {
-    // Usar edge-tts CLI
-    const bin = fs.existsSync(EDGE_BIN) ? `"${EDGE_BIN}"` : 'npx edge-tts';
-    const comando = `${bin} --voice "${vozName}" --rate="${velocidad}" --pitch="${tono}" --text "${textoEscapado}" --write-media "${outputFile}"`;
-    
-    await execPromise(comando, { maxBuffer: 50 * 1024 * 1024 });
+    // Usar la librería @andresaya/edge-tts
+    const { EdgeTTS } = await import('@andresaya/edge-tts');
+    const tts = new EdgeTTS();
+    const writeStream = fs.createWriteStream(outputFile);
+    for await (const chunk of tts.synthesizeStream(textoEscapado, vozName, { rate: velocidad, pitch: tono })) {
+      writeStream.write(chunk);
+    }
+    await new Promise((resolve, reject) => {
+      writeStream.end(() => resolve());
+      writeStream.on('error', reject);
+    });
     
     // Verificar que el archivo existe
     if (!fs.existsSync(outputFile)) {
