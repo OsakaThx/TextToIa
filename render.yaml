@@ -1,12 +1,12 @@
 services:
   - type: web
     name: tts-api
-    env: node
+    runtime: node
     plan: free
     region: oregon
     buildCommand: npm install
     startCommand: npm start
-    autoDeploy: true
+    autoDeployTrigger: commit
     healthCheckPath: /api/voces
     envVars:
       - key: NODE_VERSION
