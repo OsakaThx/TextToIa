@@ -2,6 +2,12 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { webcrypto } = require('node:crypto');
+
+// Polyfill Web Crypto for libraries that expect globalThis.crypto (browser-style)
+if (!globalThis.crypto) {
+  globalThis.crypto = webcrypto;
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -112,17 +118,15 @@ app.post('/api/tts', async (req, res) => {
     // Usar la librería @andresaya/edge-tts
     const { EdgeTTS } = await import('@andresaya/edge-tts');
     const tts = new EdgeTTS();
-    const writeStream = fs.createWriteStream(outputFile);
-    for await (const chunk of tts.synthesizeStream(textoEscapado, vozName, { rate: velocidad, pitch: tono })) {
-      writeStream.write(chunk);
-    }
-    await new Promise((resolve, reject) => {
-      writeStream.end(() => resolve());
-      writeStream.on('error', reject);
-    });
+    await tts.synthesize(textoEscapado, vozName, { rate: velocidad, pitch: tono });
+    const basePath = path.join(TEMP_DIR, `audio_${timestamp}`);
+    const savedPath = await tts.toFile(basePath);
+    
+    // Normalizar ruta de salida al archivo real generado por la librería
+    const finalPath = savedPath && fs.existsSync(savedPath) ? savedPath : outputFile;
     
     // Verificar que el archivo existe
-    if (!fs.existsSync(outputFile)) {
+    if (!fs.existsSync(finalPath)) {
       throw new Error('No se pudo generar el audio');
     }
     
@@ -130,13 +134,13 @@ app.post('/api/tts', async (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Disposition', `attachment; filename="tts_${timestamp}.mp3"`);
     
-    const stream = fs.createReadStream(outputFile);
+    const stream = fs.createReadStream(finalPath);
     stream.pipe(res);
     
     // Limpiar archivo después de enviar
     stream.on('end', () => {
       setTimeout(() => {
-        fs.unlink(outputFile, () => {});
+        fs.unlink(finalPath, () => {});
       }, 5000);
     });
     
